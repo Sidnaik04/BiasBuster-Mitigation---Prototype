@@ -1,0 +1,4 @@
+DIR violation (DIR < 0.8) → representation imbalance → SMOTE
+EOD violation (EOD > 0.1) → opportunity gap → Threshold Optimization
+DPD violation only → distribution shift → Reweighting
+Multiple violations → rank by severity, recommend least intrusive first
