@@ -71,7 +71,11 @@ if "baseline" in st.session_state:
 
     performance_table(metrics["performance"])
 
-    st.subheader("Fairness")
+    st.subheader("Fairness Metrics")
+
+    fairness_table(metrics["fairness"])
+
+    st.subheader("Selection Rate by Group")
 
     fairness_chart(metrics["fairness"]["selection_rate"])
 
@@ -143,14 +147,16 @@ if "result" in st.session_state:
     before = st.session_state["result"]["before"]
     after = st.session_state["result"]["after"]
 
-    st.subheader("Before")
+    st.subheader("Before Mitigation")
 
     performance_table(before["performance"])
+    fairness_table(before["fairness"])
     fairness_chart(before["fairness"]["selection_rate"])
 
-    st.subheader("After")
+    st.subheader("After Mitigation")
 
     performance_table(after["performance"])
+    fairness_table(after["fairness"])
     fairness_chart(after["fairness"]["selection_rate"])
 
     comparison = st.session_state["result"]["comparison"]
