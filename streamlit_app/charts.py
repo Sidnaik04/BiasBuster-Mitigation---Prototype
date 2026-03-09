@@ -13,7 +13,20 @@ def fairness_chart(selection_rates):
 
     st.bar_chart(df.set_index("group"))
 
+def fairness_table(fairness_metrics):
 
+    df = pd.DataFrame(
+        {
+            "Metric": ["DPD", "DIR", "EOD"],
+            "Value": [
+                fairness_metrics["dpd"],
+                fairness_metrics["dir"],
+                fairness_metrics["eod"],
+            ],
+        }
+    )
+
+    st.table(df)
 def performance_table(metrics):
 
     df = pd.DataFrame(metrics, index=["value"]).T

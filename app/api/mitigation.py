@@ -22,7 +22,6 @@ from app.mitigation.smote import apply_smote
 from app.mitigation.reweighting import compute_sample_weights
 from app.mitigation.threshold import apply_threshold_optimizer
 from fairlearn.postprocessing import ThresholdOptimizer
-
 from app.config import settings
 
 
@@ -98,6 +97,18 @@ def apply_mitigation(
         target_column,
         sensitive_attribute,
     )
+    # Save original dataset for fairness evaluation
+    X_original = X.copy()
+    y_original = y.copy()
+    sensitive_original = sensitive.copy()
+    # Compute baseline metrics on original dataset
+    y_pred_base = model.predict(raw_X)
+
+    baseline_metrics = evaluate_baseline(
+    y_original,
+    y_pred_base,
+    sensitive_original
+)
 
     # -------------------------------------------------
     # Baseline metrics
@@ -117,7 +128,7 @@ def apply_mitigation(
                 detail=f"Model prediction failed before mitigation: {exc}",
             )
 
-    baseline_metrics = evaluate_baseline(y, y_pred_base, sensitive)
+   
 
     # -------------------------------------------------
     # Train/Test split
@@ -140,50 +151,89 @@ def apply_mitigation(
     # Apply mitigation strategy
     # -------------------------------------------------
 
+    # -------------------------------------------------
+# Apply mitigation strategy
+# -------------------------------------------------
+
     if strategy == "smote":
 
-        X_resampled, y_resampled = apply_smote(X_train, y_train)
+     rows_before = len(X_train)
 
-        mitigated_model.fit(X_resampled, y_resampled)
+     mitigated_model, X_resampled, y_resampled = apply_smote(
+        X_train,
+        y_train,
+        model
+    )
+
+     rows_after = len(X_resampled)
+
+    # Evaluate on ORIGINAL dataset
+     y_pred_after = mitigated_model.predict(raw_X)
+
+     after_metrics = evaluate_baseline(
+        y_original,
+        y_pred_after,
+        sensitive_original
+    )
 
     elif strategy == "reweighting":
 
-        weights = compute_sample_weights(s_train)
+     weights = compute_sample_weights(s_train)
 
-        try:
-            mitigated_model.fit(X_train, y_train, sample_weight=weights)
-        except TypeError:
-            raise HTTPException(
-                status_code=400,
-                detail="Model does not support sample_weight",
-            )
+     mitigated_model.fit(X_train, y_train, sample_weight=weights)
+
+     y_pred_after = mitigated_model.predict(X_original)
+
+     after_metrics = evaluate_baseline(
+        y_original,
+        y_pred_after,
+        sensitive_original
+    )
 
     elif strategy == "threshold":
 
-        mitigated_model = apply_threshold_optimizer(
-            model,
-            X_train,
-            y_train,
-            s_train,
-            grid_size=strategy_config.get("grid_size", 200),
-        )
+     mitigated_model = apply_threshold_optimizer(
+        model,
+        X_train,
+        y_train,
+        s_train,
+        grid_size=strategy_config.get("grid_size", 200),
+    )
+
+     y_pred_after = mitigated_model.predict(
+        X_original,
+        sensitive_features=sensitive_original,
+    )
+
+     if strategy != "smote":
+      after_metrics = evaluate_baseline(y, y_pred_after, sensitive)
 
     else:
-        raise HTTPException(status_code=400, detail="Unknown strategy")
+     raise HTTPException(status_code=400, detail="Unknown strategy")
+
+  
 
     # -------------------------------------------------
     # After mitigation evaluation
     # -------------------------------------------------
 
-    if strategy == "threshold":
-        y_pred_after = mitigated_model.predict(
-            X,
-            sensitive_features=sensitive,
-        )
-    else:
-        y_pred_after = mitigated_model.predict(X)
+   
+    # -------------------------------------------------
+# After mitigation evaluation
+# -------------------------------------------------
 
-    after_metrics = evaluate_baseline(y, y_pred_after, sensitive)
+    if strategy != "smote":
+     after_metrics = evaluate_baseline(y, y_pred_after, sensitive)
+    
+    
+    # -------------------------------------------------
+# Compute improvement score
+# -------------------------------------------------
+
+    improvement_score = (
+    baseline_metrics.get("bias_severity_score", 0)
+    - after_metrics.get("bias_severity_score", 0)
+)
 
     # -------------------------------------------------
     # Save mitigated model
@@ -206,13 +256,13 @@ def apply_mitigation(
     # -------------------------------------------------
 
     run = MitigationRun(
-        upload_id=upload_id,
-        sensitive_attribute=sensitive_attribute,
-        strategy=strategy,
-        before_metrics=baseline_metrics,
-        after_metrics=after_metrics,
-        artifact_model_path=model_path,
-    )
+    upload_id=upload_id,
+    sensitive_attribute=sensitive_attribute,
+    strategy=strategy,
+    before_metrics=baseline_metrics,
+    after_metrics=after_metrics,
+    artifact_model_path=model_path,
+)
 
     db.add(run)
     db.commit()
@@ -221,11 +271,13 @@ def apply_mitigation(
     comparison = compare_metrics(baseline_metrics, after_metrics)
 
     return {
-        "status": "success",
-        "strategy": strategy,
-        "before": baseline_metrics,
-        "after": after_metrics,
-        "comparison": comparison,
-        "artifact_model": model_path,
-        "next_step": "compare_or_mitigate_next_attribute",
-    }
+    "status": "mitigation_success",
+    "strategy": strategy,
+    "rows_before": rows_before if strategy == "smote" else None,
+    "rows_after": rows_after if strategy == "smote" else None,
+    "improvement_score": improvement_score,
+    "before": baseline_metrics,
+    "after": after_metrics,
+    "comparison": comparison,
+    "artifact_model": model_path,
+}
