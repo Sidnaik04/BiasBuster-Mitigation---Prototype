@@ -23,6 +23,7 @@ from app.mitigation.reweighting import compute_sample_weights
 from app.mitigation.threshold import apply_threshold_optimizer
 from fairlearn.postprocessing import ThresholdOptimizer
 from app.config import settings
+from sklearn.pipeline import Pipeline
 
 
 router = APIRouter(prefix="/mitigation", tags=["Bias Mitigation"])
@@ -87,8 +88,11 @@ def apply_mitigation(
 
     df = load_dataset(record.dataset_path)
 
-    model_path = get_latest_model(upload_id, db, record.model_path)
+    # model_path = get_latest_model(upload_id, db, record.model_path)
+    model_path = record.model_path
     model = load_model(model_path)
+    print(model)
+  
 
     raw_X = df.drop(columns=[target_column])
 
@@ -102,33 +106,23 @@ def apply_mitigation(
     y_original = y.copy()
     sensitive_original = sensitive.copy()
     # Compute baseline metrics on original dataset
-    y_pred_base = model.predict(raw_X)
+
+    try:
+     if isinstance(model, ThresholdOptimizer):
+        y_pred_base = model.predict(
+            X_original,
+            sensitive_features=sensitive_original
+        )
+     else:
+        y_pred_base = model.predict(X_original)
+    except Exception:
+     y_pred_base = model.predict(raw_X)
 
     baseline_metrics = evaluate_baseline(
     y_original,
     y_pred_base,
     sensitive_original
 )
-
-    # -------------------------------------------------
-    # Baseline metrics
-    # -------------------------------------------------
-
-    try:
-        if isinstance(model, ThresholdOptimizer):
-            y_pred_base = model.predict(X, sensitive_features=sensitive)
-        else:
-            y_pred_base = model.predict(X)
-    except Exception:
-        try:
-            y_pred_base = model.predict(raw_X)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Model prediction failed before mitigation: {exc}",
-            )
-
-   
 
     # -------------------------------------------------
     # Train/Test split
@@ -146,12 +140,7 @@ def apply_mitigation(
     )
 
     mitigated_model = model
-
-    # -------------------------------------------------
-    # Apply mitigation strategy
-    # -------------------------------------------------
-
-    # -------------------------------------------------
+    
 # Apply mitigation strategy
 # -------------------------------------------------
 
@@ -167,7 +156,6 @@ def apply_mitigation(
 
      rows_after = len(X_resampled)
 
-    # Evaluate on ORIGINAL dataset
      y_pred_after = mitigated_model.predict(raw_X)
 
      after_metrics = evaluate_baseline(
@@ -180,9 +168,13 @@ def apply_mitigation(
 
      weights = compute_sample_weights(s_train)
 
-     mitigated_model.fit(X_train, y_train, sample_weight=weights)
+     mitigated_model.fit(
+    X_train,
+    y_train,
+    model__sample_weight=weights
+)
 
-     y_pred_after = mitigated_model.predict(X_original)
+     y_pred_after = mitigated_model.predict(raw_X)
 
      after_metrics = evaluate_baseline(
         y_original,
@@ -206,29 +198,18 @@ def apply_mitigation(
     )
 
      if strategy != "smote":
-      after_metrics = evaluate_baseline(y, y_pred_after, sensitive)
+      after_metrics = evaluate_baseline(
+    y_original,
+    y_pred_after,
+    sensitive_original
+)
 
     else:
      raise HTTPException(status_code=400, detail="Unknown strategy")
 
   
 
-    # -------------------------------------------------
-    # After mitigation evaluation
-    # -------------------------------------------------
 
-   
-    # -------------------------------------------------
-# After mitigation evaluation
-# -------------------------------------------------
-
-    if strategy != "smote":
-     after_metrics = evaluate_baseline(y, y_pred_after, sensitive)
-    
-    
-    # -------------------------------------------------
-# Compute improvement score
-# -------------------------------------------------
 
     improvement_score = (
     baseline_metrics.get("bias_severity_score", 0)
