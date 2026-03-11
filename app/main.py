@@ -6,7 +6,7 @@ from app.db.database import Base, engine
 from app.api.upload import router as upload_router
 from app.api.baseline import router as baseline_router
 from app.api.mitigation import router as mitigation_router
-from app.api.mitigation import router as auto_mitigation_router
+from app.api.auto_mitigation import router as auto_mitigation_router
 
 
 @asynccontextmanager

@@ -195,6 +195,10 @@ if st.button("Run Automatic Strategy Ranking"):
 
     ranking = auto_rank_strategies(results)
 
+    if "ranking" not in ranking or "best_strategy" not in ranking:
+        st.error(f"Ranking failed: {ranking.get('detail', ranking)}")
+        st.stop()
+
     st.session_state["ranking"] = ranking
 
 if st.session_state.get("ranking") is not None:
