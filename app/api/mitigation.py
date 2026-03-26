@@ -143,7 +143,8 @@ def apply_mitigation(
     
 # Apply mitigation strategy
 # -------------------------------------------------
-
+    rows_before = None
+    rows_after = None
     if strategy == "smote":
 
      rows_before = len(X_train)
@@ -168,13 +169,11 @@ def apply_mitigation(
 
      weights = compute_sample_weights(s_train)
 
-     mitigated_model.fit(
-    X_train,
-    y_train,
-    model__sample_weight=weights
-)
-
-     y_pred_after = mitigated_model.predict(raw_X)
+     if isinstance(mitigated_model, Pipeline):
+        mitigated_model.fit(X_train, y_train, model__sample_weight=weights)
+     else:
+        mitigated_model.fit(X_train, y_train, sample_weight=weights)
+     y_pred_after = mitigated_model.predict(X_original)
 
      after_metrics = evaluate_baseline(
         y_original,
