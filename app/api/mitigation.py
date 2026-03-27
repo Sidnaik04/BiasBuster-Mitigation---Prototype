@@ -1,6 +1,9 @@
 import os
 import uuid
 import joblib
+from imblearn.over_sampling import SMOTE
+from sklearn.base import clone
+import pandas as pd
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -128,84 +131,112 @@ def apply_mitigation(
     # Train/Test split
     # -------------------------------------------------
 
-    test_size = strategy_config.get("test_size", 0.2)
+    # test_size = strategy_config.get("test_size", 0.2)
 
-    X_train, X_test, y_train, y_test, s_train, s_test = train_test_split(
-        X,
-        y,
-        sensitive,
-        test_size=test_size,
-        random_state=42,
-        stratify=y,
-    )
+    # X_train, X_test, y_train, y_test, s_train, s_test = train_test_split(
+    #     X,
+    #     y,
+    #     sensitive,
+    #     test_size=test_size,
+    #     random_state=42,
+    #     stratify=y,
+    # )
 
-    mitigated_model = model
+    # mitigated_model = model
     
 # Apply mitigation strategy
 # -------------------------------------------------
+    # Apply mitigation strategy
+# -------------------------------------------------
     rows_before = None
     rows_after = None
+
+# =========================
+# SMOTE (FULL DATA)
+# =========================
     if strategy == "smote":
 
-     rows_before = len(X_train)
+    
 
-     mitigated_model, X_resampled, y_resampled = apply_smote(
-        X_train,
-        y_train,
-        model
+     mitigated_model, X_balanced, y_balanced, sensitive_balanced = apply_smote(
+        X, y, sensitive, model
     )
 
-     rows_after = len(X_resampled)
+     rows_before = len(X)
+     rows_after = len(X_balanced)
 
-     y_pred_after = mitigated_model.predict(raw_X)
+    # Save debiased dataset
+     df_balanced = pd.DataFrame(X_balanced, columns=X.columns)
+     df_balanced[target_column] = y_balanced
+
+     dataset_id = uuid.uuid4().hex 
+     dataset_path = os.path.join(
+        settings.ARTIFACT_DIR,
+        "datasets",
+        f"debiased_{dataset_id}.csv"
+    )
+
+     os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
+     df_balanced.to_csv(dataset_path, index=False)
+
+     y_pred_after = mitigated_model.predict(X_balanced)
 
      after_metrics = evaluate_baseline(
-        y_original,
+        y_balanced,
         y_pred_after,
-        sensitive_original
+        sensitive_balanced
     )
 
+# =========================
+# REWEIGHTING (FULL DATA)
+# =========================
     elif strategy == "reweighting":
 
-     weights = compute_sample_weights(s_train)
+    
+
+     weights = compute_sample_weights(y, sensitive)
+
+     mitigated_model = clone(model)
 
      if isinstance(mitigated_model, Pipeline):
-        mitigated_model.fit(X_train, y_train, model__sample_weight=weights)
+        mitigated_model.fit(X, y, model__sample_weight=weights)
      else:
-        mitigated_model.fit(X_train, y_train, sample_weight=weights)
-     y_pred_after = mitigated_model.predict(X_original)
+        mitigated_model.fit(X, y, sample_weight=weights)
+
+     y_pred_after = mitigated_model.predict(X)
 
      after_metrics = evaluate_baseline(
-        y_original,
+        y,
         y_pred_after,
-        sensitive_original
+        sensitive
     )
 
+# =========================
+# THRESHOLD OPTIMIZER (FULL DATA)
+# =========================
     elif strategy == "threshold":
 
-     mitigated_model = apply_threshold_optimizer(
+      mitigated_model = apply_threshold_optimizer(
         model,
-        X_train,
-        y_train,
-        s_train,
+        X,
+        y,
+        sensitive,
         grid_size=strategy_config.get("grid_size", 200),
     )
 
-     y_pred_after = mitigated_model.predict(
-        X_original,
-        sensitive_features=sensitive_original,
+      y_pred_after = mitigated_model.predict(
+        X,
+        sensitive_features=sensitive,
     )
 
-     if strategy != "smote":
       after_metrics = evaluate_baseline(
-    y_original,
-    y_pred_after,
-    sensitive_original
-)
+        y,
+        y_pred_after,
+        sensitive
+    )
 
     else:
      raise HTTPException(status_code=400, detail="Unknown strategy")
-
   
 
 
