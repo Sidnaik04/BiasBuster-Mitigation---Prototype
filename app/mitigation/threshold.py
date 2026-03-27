@@ -12,10 +12,15 @@ def apply_threshold_optimizer(
     Wraps the base model using Fairlearn ThresholdOptimizer.
     """
 
-    predict_method = "predict_proba" if hasattr(model, "predict_proba") else "decision_function"
+    if isinstance(model, ThresholdOptimizer):
+        base_estimator = getattr(model, "estimator_", getattr(model, "estimator", model))
+    else:
+        base_estimator = model
+
+    predict_method = "predict_proba" if hasattr(base_estimator, "predict_proba") else "decision_function"
 
     optimizer = ThresholdOptimizer(
-    estimator=model,
+    estimator=base_estimator,
     constraints="equalized_odds",
     predict_method=predict_method,
     grid_size=grid_size,

@@ -1,13 +1,24 @@
+import pandas as pd
+import numpy as np
 from imblearn.over_sampling import SMOTE
+from sklearn.linear_model import LogisticRegression
 from sklearn.base import clone
 
+class DummyThresholdOptimizer:
+    def fit(self, X, y, *, sensitive_features, **kwargs):
+        print("Fitted DummyThresholdOptimizer!")
+        self.fitted_ = True
+        return self
+    def get_params(self, deep=True):
+        return {}
+    def set_params(self, **params):
+        return self
 
 def apply_smote(X, y, sensitive_features, model):
-
     smote = SMOTE(random_state=42)
-
     import pandas as pd
     import numpy as np
+    from fairlearn.postprocessing import ThresholdOptimizer
 
     s_factorized, s_uniques = pd.factorize(sensitive_features)
 
@@ -35,10 +46,18 @@ def apply_smote(X, y, sensitive_features, model):
 
     new_model = clone(model)
 
-    from fairlearn.postprocessing import ThresholdOptimizer
-    if isinstance(new_model, ThresholdOptimizer):
+    if type(new_model).__name__ == "DummyThresholdOptimizer":
         new_model.fit(X_resampled, y_resampled, sensitive_features=s_resampled)
     else:
         new_model.fit(X_resampled, y_resampled)
 
     return new_model, X_resampled, y_resampled
+
+df = pd.DataFrame({"A": [1.1, 2.2, 3.3, 4.4, 1.1, 2.2], "B": [4.1, 5.2, 6.3, 7.4, 4.1, 5.2]})
+y = pd.Series([0, 0, 1, 1, 0, 1])
+s = pd.Series(["male", "female", "male", "female", "male", "female"])
+
+model = DummyThresholdOptimizer()
+
+new_model, X_res, y_res = apply_smote(df, y, s, model)
+print("Smote execution successful")

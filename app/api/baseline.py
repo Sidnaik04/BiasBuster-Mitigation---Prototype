@@ -5,7 +5,7 @@ from app.db.database import get_db
 from app.db.models import UploadRecord
 from app.core.dataset_loader import load_dataset
 from app.core.model_loader import load_model
-from app.core.preprocessing import preprocess_dataset
+from app.core.preprocessing import preprocess_dataset, align_features
 from app.fairness.evaluator import evaluate_baseline
 
 router = APIRouter(prefix="/baseline", tags=["Baseline Evaluation"])
@@ -24,17 +24,36 @@ def run_baseline(
         raise HTTPException(status_code=404, detail="Upload record not found")
 
     df = load_dataset(record.dataset_path)
-    model = load_model(record.model_path)
+    model, preprocessor = load_model(record.model_path)
     raw_X = df.drop(columns=[target_column])
 
     X, y_true, sensitive = preprocess_dataset(df, target_column, sensitive_attribute)
 
+    from app.core.preprocessing import apply_preprocessor
+    X_preprocessed = apply_preprocessor(raw_X, preprocessor, df.index)
+    if X_preprocessed is not None:
+        X = X_preprocessed
+
+    raw_X = align_features(raw_X, model)
+    X = align_features(X, model)
+
+    from fairlearn.postprocessing import ThresholdOptimizer
+
     try:
-        y_pred = model.predict(X)
+        if isinstance(model, ThresholdOptimizer):
+            y_pred = model.predict(X, sensitive_features=sensitive)
+        else:
+            y_pred = model.predict(X)
     except Exception as first_exc:
+        import traceback
+        print("First exception:", traceback.format_exc())
         try:
-            y_pred = model.predict(raw_X)
+            if isinstance(model, ThresholdOptimizer):
+                y_pred = model.predict(raw_X, sensitive_features=sensitive)
+            else:
+                y_pred = model.predict(raw_X)
         except Exception as second_exc:
+            print("Second exception:", traceback.format_exc())
             raise HTTPException(
                 status_code=400,
                 detail=(

@@ -11,7 +11,7 @@ from app.db.models import UploadRecord, MitigationRun
 
 from app.core.dataset_loader import load_dataset
 from app.core.model_loader import load_model
-from app.core.preprocessing import preprocess_dataset
+from app.core.preprocessing import preprocess_dataset, align_features
 from app.core.persistence import get_latest_model
 
 from app.fairness.evaluator import evaluate_baseline
@@ -90,7 +90,7 @@ def apply_mitigation(
 
     # model_path = get_latest_model(upload_id, db, record.model_path)
     model_path = record.model_path
-    model = load_model(model_path)
+    model, preprocessor = load_model(model_path)
     print(model)
   
 
@@ -101,6 +101,14 @@ def apply_mitigation(
         target_column,
         sensitive_attribute,
     )
+    
+    from app.core.preprocessing import apply_preprocessor
+    X_preprocessed = apply_preprocessor(raw_X, preprocessor, df.index)
+    if X_preprocessed is not None:
+        X = X_preprocessed
+
+    raw_X = align_features(raw_X, model)
+    X = align_features(X, model)
     # Save original dataset for fairness evaluation
     X_original = X.copy()
     y_original = y.copy()
@@ -152,12 +160,16 @@ def apply_mitigation(
      mitigated_model, X_resampled, y_resampled = apply_smote(
         X_train,
         y_train,
+        s_train,
         model
     )
 
      rows_after = len(X_resampled)
 
-     y_pred_after = mitigated_model.predict(raw_X)
+     if isinstance(mitigated_model, ThresholdOptimizer):
+         y_pred_after = mitigated_model.predict(X_original, sensitive_features=sensitive_original)
+     else:
+         y_pred_after = mitigated_model.predict(X_original)
 
      after_metrics = evaluate_baseline(
         y_original,
@@ -169,11 +181,26 @@ def apply_mitigation(
 
      weights = compute_sample_weights(s_train)
 
-     if isinstance(mitigated_model, Pipeline):
-        mitigated_model.fit(X_train, y_train, model__sample_weight=weights)
+     from fairlearn.postprocessing import ThresholdOptimizer
+     fit_params = {}
+
+     underlying_model = mitigated_model.estimator if isinstance(mitigated_model, ThresholdOptimizer) else mitigated_model
+
+     if isinstance(underlying_model, Pipeline):
+         last_step_name = underlying_model.steps[-1][0]
+         fit_params[f"{last_step_name}__sample_weight"] = weights
      else:
-        mitigated_model.fit(X_train, y_train, sample_weight=weights)
-     y_pred_after = mitigated_model.predict(X_original)
+         fit_params["sample_weight"] = weights
+
+     if isinstance(mitigated_model, ThresholdOptimizer):
+         fit_params["sensitive_features"] = s_train
+
+     mitigated_model.fit(X_train, y_train, **fit_params)
+        
+     if isinstance(mitigated_model, ThresholdOptimizer):
+         y_pred_after = mitigated_model.predict(X_original, sensitive_features=sensitive_original)
+     else:
+         y_pred_after = mitigated_model.predict(X_original)
 
      after_metrics = evaluate_baseline(
         y_original,
@@ -182,6 +209,13 @@ def apply_mitigation(
     )
 
     elif strategy == "threshold":
+     import numpy as np
+     unique_labels = np.unique(y_train)
+     if not set(unique_labels).issubset({0, 1}):
+         raise HTTPException(
+             status_code=400,
+             detail=f"Threshold optimization computationally requires strict binary classification targets (0 and 1). Your raw dataset mapped naturally to: {unique_labels.tolist()}."
+         )
 
      mitigated_model = apply_threshold_optimizer(
         model,
