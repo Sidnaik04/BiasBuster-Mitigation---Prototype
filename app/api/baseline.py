@@ -29,38 +29,29 @@ def run_baseline(
 
     X, y_true, sensitive = preprocess_dataset(df, target_column, sensitive_attribute)
 
-    from app.core.preprocessing import apply_preprocessor
-    X_preprocessed = apply_preprocessor(raw_X, preprocessor, df.index)
-    if X_preprocessed is not None:
-        X = X_preprocessed
-
-    raw_X = align_features(raw_X, model)
-    X = align_features(X, model)
-
+    from sklearn.pipeline import Pipeline
     from fairlearn.postprocessing import ThresholdOptimizer
+
+    # Fallback mapping for legacy models submitted purely as estimators (e.g. relying previously on pd.get_dummies)
+    if not isinstance(model, Pipeline) and not (isinstance(model, ThresholdOptimizer) and getattr(model, "estimator", None) and isinstance(model.estimator, Pipeline)):
+        import pandas as pd
+        X_encoded = pd.get_dummies(raw_X)
+        from app.core.preprocessing import align_features
+        X_original = align_features(X_encoded, getattr(model, "estimator", model))
+    else:
+        # Enforce evaluation directly against raw strings for formal internal pipelines
+        X_original = raw_X.copy()
 
     try:
         if isinstance(model, ThresholdOptimizer):
-            y_pred = model.predict(X, sensitive_features=sensitive)
+            y_pred = model.predict(X_original, sensitive_features=sensitive)
         else:
-            y_pred = model.predict(X)
-    except Exception as first_exc:
-        import traceback
-        print("First exception:", traceback.format_exc())
-        try:
-            if isinstance(model, ThresholdOptimizer):
-                y_pred = model.predict(raw_X, sensitive_features=sensitive)
-            else:
-                y_pred = model.predict(raw_X)
-        except Exception as second_exc:
-            print("Second exception:", traceback.format_exc())
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Model prediction failed on both preprocessed and raw features. "
-                    f"preprocessed_error={first_exc}; raw_error={second_exc}"
-                ),
-            )
+            y_pred = model.predict(X_original)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pipeline inference failed structurally: Ensure uploaded model contains internal ColumnTransformer pipeline mapping strings to estimators. Error details: {exc}"
+        )
 
     result = evaluate_baseline(y_true, y_pred, sensitive)
 

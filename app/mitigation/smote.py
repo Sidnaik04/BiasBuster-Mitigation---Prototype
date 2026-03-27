@@ -3,42 +3,53 @@ from sklearn.base import clone
 
 
 def apply_smote(X, y, sensitive_features, model):
-
-    smote = SMOTE(random_state=42)
-
+    from imblearn.pipeline import Pipeline as ImbPipeline
+    from imblearn.over_sampling import SMOTE, SMOTENC
+    from sklearn.base import clone
+    from fairlearn.postprocessing import ThresholdOptimizer
+    from sklearn.pipeline import Pipeline
     import pandas as pd
     import numpy as np
-
-    s_factorized, s_uniques = pd.factorize(sensitive_features)
-
-    if isinstance(X, pd.DataFrame):
-        X_combined = X.copy()
-        s_col_name = "__sensitive__"
-        X_combined[s_col_name] = s_factorized
+    
+    if isinstance(model, ThresholdOptimizer):
+        base_pipe = model.estimator
     else:
-        X_combined = np.column_stack((X, s_factorized))
-
-    X_resampled_combined, y_resampled = smote.fit_resample(X_combined, y)
-
-    if isinstance(X_resampled_combined, pd.DataFrame):
-        s_col_name = "__sensitive__"
-        s_factorized_resampled = X_resampled_combined[s_col_name].round().astype(int)
-        s_factorized_resampled = np.clip(s_factorized_resampled, 0, len(s_uniques) - 1)
-        s_resampled = pd.Series(s_uniques[s_factorized_resampled])
-        X_resampled = X_resampled_combined.drop(columns=[s_col_name])
+        base_pipe = model
+        
+    base_pipe = clone(base_pipe)
+    
+    if hasattr(base_pipe, "steps") or isinstance(base_pipe, Pipeline):
+        steps = base_pipe.steps
+        sampler = SMOTE(random_state=42)
+        new_steps = steps[:-1] + [('smote', sampler), steps[-1]]
     else:
-        s_col_index = X_resampled_combined.shape[1] - 1
-        s_factorized_resampled = np.round(X_resampled_combined[:, s_col_index]).astype(int)
-        s_factorized_resampled = np.clip(s_factorized_resampled, 0, len(s_uniques) - 1)
-        s_resampled = pd.Series(s_uniques[s_factorized_resampled])
-        X_resampled = np.delete(X_resampled_combined, s_col_index, axis=1)
-
-    new_model = clone(model)
-
-    from fairlearn.postprocessing import ThresholdOptimizer
-    if isinstance(new_model, ThresholdOptimizer):
-        new_model.fit(X_resampled, y_resampled, sensitive_features=s_resampled)
+        cat_indices = []
+        if isinstance(X, pd.DataFrame):
+            cat_cols = X.select_dtypes(include=['object', 'category', 'string']).columns
+            cat_indices = [X.columns.get_loc(c) for c in cat_cols]
+            
+        if len(cat_indices) > 0:
+            sampler = SMOTENC(categorical_features=cat_indices, random_state=42)
+        else:
+            sampler = SMOTE(random_state=42)
+            
+        new_steps = [('smote', sampler), ('model', base_pipe)]
+        
+    new_model_base = ImbPipeline(new_steps)
+    
+    if isinstance(model, ThresholdOptimizer):
+        new_model = ThresholdOptimizer(
+            estimator=new_model_base,
+            constraints=model.constraints,
+            predict_method=model.predict_method,
+            grid_size=getattr(model, 'grid_size', 1000),
+        )
+        new_model.fit(X, y, sensitive_features=sensitive_features)
     else:
-        new_model.fit(X_resampled, y_resampled)
+        new_model = new_model_base
+        new_model.fit(X, y)
 
-    return new_model, X_resampled, y_resampled
+    y_counts = np.bincount(y) if not isinstance(y, pd.Series) else y.value_counts(dropna=True).values
+    rows_after = int(np.max(y_counts) * len(y_counts))
+        
+    return new_model, rows_after

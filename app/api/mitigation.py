@@ -102,15 +102,19 @@ def apply_mitigation(
         sensitive_attribute,
     )
     
-    from app.core.preprocessing import apply_preprocessor
-    X_preprocessed = apply_preprocessor(raw_X, preprocessor, df.index)
-    if X_preprocessed is not None:
-        X = X_preprocessed
-
-    raw_X = align_features(raw_X, model)
-    X = align_features(X, model)
-    # Save original dataset for fairness evaluation
-    X_original = X.copy()
+    from sklearn.pipeline import Pipeline
+    from fairlearn.postprocessing import ThresholdOptimizer
+    
+    # Fallback to handle old pd.get_dummies models lacking internal pipelines
+    if not isinstance(model, Pipeline) and not (isinstance(model, ThresholdOptimizer) and getattr(model, "estimator", None) and isinstance(model.estimator, Pipeline)):
+        import pandas as pd
+        X_encoded = pd.get_dummies(raw_X)
+        from app.core.preprocessing import align_features
+        X_original = align_features(X_encoded, getattr(model, "estimator", model))
+    else:
+        # Pass raw_X directly since formal Pipelines correctly map strings internally
+        X_original = raw_X.copy()
+        
     y_original = y.copy()
     sensitive_original = sensitive.copy()
     # Compute baseline metrics on original dataset
@@ -139,7 +143,7 @@ def apply_mitigation(
     test_size = strategy_config.get("test_size", 0.2)
 
     X_train, X_test, y_train, y_test, s_train, s_test = train_test_split(
-        X,
+        X_original,
         y,
         sensitive,
         test_size=test_size,
@@ -157,14 +161,12 @@ def apply_mitigation(
 
      rows_before = len(X_train)
 
-     mitigated_model, X_resampled, y_resampled = apply_smote(
+     mitigated_model, rows_after = apply_smote(
         X_train,
         y_train,
         s_train,
         model
     )
-
-     rows_after = len(X_resampled)
 
      if isinstance(mitigated_model, ThresholdOptimizer):
          y_pred_after = mitigated_model.predict(X_original, sensitive_features=sensitive_original)
