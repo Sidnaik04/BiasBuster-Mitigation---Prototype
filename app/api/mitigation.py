@@ -5,6 +5,7 @@ from imblearn.over_sampling import SMOTE
 from sklearn.base import clone
 import pandas as pd
 
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sklearn.model_selection import train_test_split
@@ -118,8 +119,12 @@ def apply_mitigation(
         )
      else:
         y_pred_base = model.predict(X_original)
-    except Exception:
-     y_pred_base = model.predict(raw_X)
+
+    except Exception as e:
+     raise HTTPException(
+        status_code=400,
+        detail=f"Model prediction failed: {str(e)}"
+    )
 
     baseline_metrics = evaluate_baseline(
     y_original,
