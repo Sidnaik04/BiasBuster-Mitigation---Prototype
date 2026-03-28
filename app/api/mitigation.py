@@ -20,6 +20,7 @@ from app.core.persistence import get_latest_model
 
 from app.fairness.evaluator import evaluate_baseline
 from app.fairness.comparison import compare_metrics
+from app.core.inference import predict_with_fallback
 
 from app.mitigation.recommender import recommend_strategy
 from app.mitigation.smote import apply_smote
@@ -105,6 +106,13 @@ def apply_mitigation(
         target_column,
         sensitive_attribute,
     )
+
+    from app.core.inference import standardize_columns, get_expected_features
+    expected = get_expected_features(model)
+    if expected is not None:
+        X = standardize_columns(X, expected)
+        raw_X = standardize_columns(raw_X, expected)
+
     # Save original dataset for fairness evaluation
     X_original = X.copy()
     y_original = y.copy()
@@ -112,19 +120,12 @@ def apply_mitigation(
     # Compute baseline metrics on original dataset
 
     try:
-     if isinstance(model, ThresholdOptimizer):
-        y_pred_base = model.predict(
-            X_original,
-            sensitive_features=sensitive_original
-        )
-     else:
-        y_pred_base = model.predict(X_original)
-
+        y_pred_base = predict_with_fallback(model, X_original, raw_X, sensitive_original)
     except Exception as e:
-     raise HTTPException(
-        status_code=400,
-        detail=f"Model prediction failed: {str(e)}"
-    )
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
 
     baseline_metrics = evaluate_baseline(
     y_original,
@@ -184,7 +185,10 @@ def apply_mitigation(
      os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
      df_balanced.to_csv(dataset_path, index=False)
 
-     y_pred_after = mitigated_model.predict(X_balanced)
+     if isinstance(mitigated_model, ThresholdOptimizer):
+         y_pred_after = mitigated_model.predict(X_balanced, sensitive_features=sensitive_balanced)
+     else:
+         y_pred_after = mitigated_model.predict(X_balanced)
 
      after_metrics = evaluate_baseline(
         y_balanced,
@@ -205,10 +209,16 @@ def apply_mitigation(
 
      if isinstance(mitigated_model, Pipeline):
         mitigated_model.fit(X, y, model__sample_weight=weights)
+     elif isinstance(mitigated_model, ThresholdOptimizer):
+        mitigated_model.prefit = False
+        mitigated_model.fit(X, y, sample_weight=weights, sensitive_features=sensitive)
      else:
         mitigated_model.fit(X, y, sample_weight=weights)
 
-     y_pred_after = mitigated_model.predict(X)
+     if isinstance(mitigated_model, ThresholdOptimizer):
+         y_pred_after = mitigated_model.predict(X, sensitive_features=sensitive)
+     else:
+         y_pred_after = mitigated_model.predict(X)
 
      after_metrics = evaluate_baseline(
         y,

@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "<string>", line 31, in <module>
+  File "C:\Users\Yash Gaonkar\AllInOne\BBprototype\BiasBuster-Mitigation---Prototype\venv\lib\site-packages\fairlearn\postprocessing\_threshold_optimizer.py", line 332, in fit
+    scores = _get_soft_predictions(self.estimator_, X, self._predict_method)
+  File "C:\Users\Yash Gaonkar\AllInOne\BBprototype\BiasBuster-Mitigation---Prototype\venv\lib\site-packages\fairlearn\utils\_common.py", line 50, in _get_soft_predictions
+    output = getattr(estimator, predict_method)(X)
+  File "C:\Users\Yash Gaonkar\AllInOne\BBprototype\BiasBuster-Mitigation---Prototype\venv\lib\site-packages\sklearn\linear_model\_logistic.py", line 1455, in predict_proba
+    check_is_fitted(self)
+  File "C:\Users\Yash Gaonkar\AllInOne\BBprototype\BiasBuster-Mitigation---Prototype\venv\lib\site-packages\sklearn\utils\validation.py", line 1754, in check_is_fitted
+    raise NotFittedError(msg % {"name": type(estimator).__name__})
+sklearn.exceptions.NotFittedError: This LogisticRegression instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.

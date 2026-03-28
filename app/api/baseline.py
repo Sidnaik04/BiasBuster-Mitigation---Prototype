@@ -7,6 +7,7 @@ from app.core.dataset_loader import load_dataset
 from app.core.model_loader import load_model
 from app.core.preprocessing import preprocess_dataset
 from app.fairness.evaluator import evaluate_baseline
+from app.core.inference import predict_with_fallback
 
 router = APIRouter(prefix="/baseline", tags=["Baseline Evaluation"])
 
@@ -30,18 +31,12 @@ def run_baseline(
     X, y_true, sensitive = preprocess_dataset(df, target_column, sensitive_attribute)
 
     try:
-        y_pred = model.predict(X)
-    except Exception as first_exc:
-        try:
-            y_pred = model.predict(raw_X)
-        except Exception as second_exc:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Model prediction failed on both preprocessed and raw features. "
-                    f"preprocessed_error={first_exc}; raw_error={second_exc}"
-                ),
-            )
+        y_pred = predict_with_fallback(model, X, raw_X, sensitive)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc)
+        )
 
     result = evaluate_baseline(y_true, y_pred, sensitive)
 

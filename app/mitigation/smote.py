@@ -33,6 +33,10 @@ def apply_smote(X, y, sensitive, model):
     # Train model
     # -----------------------------
     new_model = clone(model)
-    new_model.fit(X_resampled, y_resampled)
+    if type(new_model).__name__ == "ThresholdOptimizer":
+        new_model.prefit = False
+        new_model.fit(X_resampled, y_resampled, sensitive_features=sensitive_resampled)
+    else:
+        new_model.fit(X_resampled, y_resampled)
 
     return new_model, X_resampled, y_resampled, sensitive_resampled
